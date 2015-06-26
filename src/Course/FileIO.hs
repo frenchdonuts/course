@@ -62,8 +62,9 @@ the contents of c
 -- /Tip:/ use @getArgs@ and @run@
 main ::
   IO ()
-main =
-  error "todo: Course.FileIO#main"
+main = getArgs >>=
+    (pure . headOr "") >>=
+    run
 
 type FilePath =
   Chars
@@ -72,31 +73,35 @@ type FilePath =
 run ::
   Chars
   -> IO ()
-run =
-  error "todo: Course.FileIO#run"
+run filePath = (readFile filePath) >>=
+  (pure . lines) >>=
+  getFiles >>=
+  printFiles
+-- Although not using do notation looks kind of nice and creates no
+-- "extraneous" temporary variables, those variables improve the readability
+-- of the program
 
 getFiles ::
   List FilePath
   -> IO (List (FilePath, Chars))
-getFiles =
-  error "todo: Course.FileIO#getFiles"
+getFiles = sequence . (map getFile)
 
 getFile ::
   FilePath
   -> IO (FilePath, Chars)
-getFile =
-  error "todo: Course.FileIO#getFile"
+getFile filePath = lift2 (,) (pure filePath) (readFile filePath)
 
 printFiles ::
   List (FilePath, Chars)
   -> IO ()
-printFiles =
-  error "todo: Course.FileIO#printFiles"
+printFiles = void . sequence . (map $ uncurry printFile)
+-- where printFile' filePath contents = printFile filePath contents
+-- uncurry :: (a -> b -> c) -> (a,b) -> c
 
 printFile ::
   FilePath
   -> Chars
   -> IO ()
-printFile =
-  error "todo: Course.FileIO#printFile"
-
+printFile filePath contents =
+  putStrLn ("============ " ++ filePath) >>
+  putStrLn contents

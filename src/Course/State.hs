@@ -41,8 +41,9 @@ instance Functor (State s) where
     (a -> b)
     -> State s a
     -> State s b
-  (<$>) =
-      error "todo: Course.State#(<$>)"
+  (<$>) f (State k) = State (\s -> newPair $ k s)
+    where newPair (a, s') = (f a, s')
+-- (a -> b) -> (s -> (a, s)) -> (s -> (b, s))
 
 -- | Implement the `Apply` instance for `State s`.
 -- >>> runState (pure (+1) <*> pure 0) 0
@@ -55,9 +56,12 @@ instance Apply (State s) where
   (<*>) ::
     State s (a -> b)
     -> State s a
-    -> State s b 
-  (<*>) =
-    error "todo: Course.State (<*>)#instance (State s)"
+    -> State s b
+  (<*>) (State fs) (State as) =
+    State (\s -> let (f, s1) = fs s
+                     (a, s2) = as s1
+                  in (f a, s2))
+
 
 -- | Implement the `Applicative` instance for `State s`.
 -- >>> runState (pure 2) 0
@@ -66,8 +70,7 @@ instance Applicative (State s) where
   pure ::
     a
     -> State s a
-  pure =
-    error "todo: Course.State pure#instance (State s)"
+  pure a = State (\s' -> (a, s'))
 
 -- | Implement the `Bind` instance for `State s`.
 -- >>> runState ((const $ put 2) =<< put 1) 0
@@ -77,8 +80,10 @@ instance Bind (State s) where
     (a -> State s b)
     -> State s a
     -> State s b
-  (=<<) =
-    error "todo: Course.State (=<<)#instance (State s)"
+  (=<<) f (State as) =
+    State (\s -> let (a, s1) = as s
+                  in runState (f a) s1)
+-- f =<< s
 
 instance Monad (State s) where
 
@@ -89,8 +94,7 @@ exec ::
   State s a
   -> s
   -> s
-exec =
-  error "todo: Course.State#exec"
+exec stateM s = snd $ runState stateM s
 
 -- | Run the `State` seeded with `s` and retrieve the resulting value.
 --
@@ -99,8 +103,7 @@ eval ::
   State s a
   -> s
   -> a
-eval =
-  error "todo: Course.State#eval"
+eval stateM s = fst $ runState stateM s
 
 -- | A `State` where the state also distributes into the produced value.
 --
@@ -108,8 +111,7 @@ eval =
 -- (0,0)
 get ::
   State s s
-get =
-  error "todo: Course.State#get"
+get = State (\s -> (s,s))
 
 -- | A `State` where the resulting state is seeded with the given value.
 --
@@ -118,8 +120,8 @@ get =
 put ::
   s
   -> State s ()
-put =
-  error "todo: Course.State#put"
+put s0 = State (\s -> ((),s0))
+-- Also: State . const . (,) ()
 
 -- | Find the first element in a `List` that satisfies a given predicate.
 -- It is possible that no element is found, hence an `Optional` result.
@@ -140,8 +142,14 @@ findM ::
   (a -> f Bool)
   -> List a
   -> f (Optional a)
-findM =
-  error "todo: Course.State#findM"
+findM p = foldRight stepFn (pure Empty)
+  where stepFn x acc = (p x) >>= (\b -> if b then (pure $ Full x) else acc)
+-- (a -> f Bool) -> List a -> f (Optional a)
+-- Using findM below for firstRepeat and distinct made me realize what Erik Meijer said about Monads
+-- Monads let you focus on the happy path!
+--  (a -> m Bool):
+--    m - all this other "stuff"(IO, State, whatever) is going on BUT
+--    all you have to focus on is the Bool value I return!!
 
 -- | Find the first element in a `List` that repeats.
 -- It is possible that no element repeats, hence an `Optional` result.
@@ -154,8 +162,13 @@ firstRepeat ::
   Ord a =>
   List a
   -> Optional a
-firstRepeat =
-  error "todo: Course.State#firstRepeat"
+firstRepeat xs = eval (findM p xs) S.empty
+  where p x = State (\set -> (S.member x set, S.insert x set))
+-- findM :: (a -> f Bool) -> List a -> f Optional a
+-- p :: Ord a => a -> State (S.Set a) Bool
+-- State: a set representing the elements we have seen
+-- Value: True if we have seen this value before, False if not
+--  This is the only thing findM has to worry about
 
 -- | Remove all duplicate elements in a `List`.
 -- /Tip:/ Use `filtering` and `State` with a @Data.Set#Set@.
@@ -167,18 +180,28 @@ distinct ::
   Ord a =>
   List a
   -> List a
-distinct =
-  error "todo: Course.State#distinct"
+distinct xs = eval (filtering p xs) S.empty
+  where p x = State (\set -> (not $ S.member x set, S.insert x set))
+-- filtering :: ...=> (a -> f Bool) -> List a -> f (List a)
+-- f Bool ==> State Set Bool
+-- p :: a -> State Set Bool
+-- We want to return True (include this element) if we have NOT seen it before
+-- State (Set) represents elements we have seen
 
 -- | A happy number is a positive integer, where the sum of the square of its digits eventually reaches 1 after repetition.
 -- In contrast, a sad number (not a happy number) is where the sum of the square of its digits never reaches 1
 -- because it results in a recurring sequence.
 --
 -- /Tip:/ Use `findM` with `State` and `produce`.
+--  findM :: (a -> f Bool) -> List a -> f Optional a
+--  produce :: (a -> a) -> a -> List a (great for defining recurrence relations)
 --
 -- /Tip:/ Use `join` to write a @square@ function.
+--  join :: f (f a) -> f a
 --
 -- /Tip:/ Use library functions: @Optional#contains@, @Data.Char#digitToInt@.
+--  Course.Optional.contains :: a -> Optional a -> Bool
+--  Data.Char.digitToInt :: Char -> Int
 --
 -- >>> isHappy 4
 -- False
@@ -194,5 +217,40 @@ distinct =
 isHappy ::
   Integer
   -> Bool
-isHappy =
-  error "todo: Course.State#isHappy"
+isHappy x = Course.Optional.contains 1 (firstRepeat $ happySequence x)
+
+happySequence seed = sum(squareOfDigits seed) :. happySequence (sum(squareOfDigits seed))
+-- happySequence can also be written as:
+-- produce (toInteger . sum . map (join (*) . digitToInt) . show')
+-- How does join (*) turn into square? Let's look at the types
+-- join :: f (f a) -> f a
+--   f ==> (->) a
+-- join :: Num a => (->) a ((->) a a) -> (-> a) a
+-- join :: Num a => a -> (a -> a) -> (a -> a)
+-- join (*) =
+--   id =<< (*)          <Definition: f =<< g = (\t -> f (g t) t)>
+--   (\t -> id ((*) t) t)
+--   (\t -> ((*) t) t)
+--   (\t -> (*) t t)
+--   (\t -> t * t)
+-- square
+-- Here we learn about how join works for any binary function f:
+--  join f = (\x -> f x x)
+
+squareOfDigits :: Integer -> List Integer
+squareOfDigits i = map square (digits i)
+
+digits :: Integral a => a -> List a
+digits i
+  | (i < 10) = i :. Nil
+  | otherwise = (i `mod` 10) :. digits (i `div` 10)
+
+square :: Num a => a -> a
+square x = x * x
+-- Return True if sum of square of digits eventually is 1
+-- Return False if we see a number we already saw (whose sum of square of digits is not 1)
+-- 7 -> 49
+-- 4^2 + 9^2 = 97
+-- 9^2 + 7^2 = 130
+-- 1^2 + 3^2 + 0 = 10
+-- 1^2 + 0 = 1 -> True
